@@ -1,4 +1,4 @@
-# redacto
+# redacto (legacy)
 
 eBPF-based transparent string redaction tool. Wraps a child process and intercepts its `read` syscalls to redact sensitive strings, based on a YAML config. Rehydrates placeholders back to originals on the write path by default, so files on disk remain unchanged.
 

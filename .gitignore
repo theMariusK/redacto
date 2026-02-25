@@ -1,0 +1,6 @@
+vmlinux.h
+bpf_bpfel.o
+bpf_bpfel.go
+bpf_bpfeb.o
+bpf_bpfeb.go
+redacto

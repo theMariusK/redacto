@@ -2,15 +2,6 @@
 
 FUSE-based cross-platform file redaction tool. Mounts a virtual filesystem overlay that mirrors a real project directory, redacting secrets on read and rehydrating them on write.
 
-## Features
-
-- **Cross-platform**: Works on Linux and macOS (no root required)
-- **No kernel taint**: Pure userspace, no eBPF
-- **All access patterns**: Handles mmap, pread, readv automatically via FUSE
-- **Same config format**: Compatible with `redacto` YAML config (`~/.redacto.yaml`)
-- **Binary file detection**: Skips binary files by extension and content sniffing
-- **Exec mode**: Mount, run a command inside the mount, unmount on exit
-
 ## Requirements
 
 - Go 1.22+
@@ -20,7 +11,7 @@ FUSE-based cross-platform file redaction tool. Mounts a virtual filesystem overl
 ## Build
 
 ```bash
-make build
+make
 ```
 
 ## Usage
@@ -64,7 +55,7 @@ redacto --mount-dir /tmp/mymount /home/user/project
 
 ## Config Format
 
-Same as `redacto` — your existing `~/.redacto.yaml` works:
+Default config lives at `~/.redacto.yaml`:
 
 ```yaml
 rules:
@@ -87,7 +78,6 @@ skip_paths: [".cache", "build"]
 ### Constraints
 
 - **Same-length**: `original` and `placeholder` must be the same byte length (auto-generated placeholders satisfy this)
-- **No rule count limit**: Unlike the eBPF version, there is no 16-rule or 128-byte limit
 
 ## How It Works
 
@@ -111,14 +101,3 @@ AI Agent (works in /mnt/redacted)
 - `direct_io` is enabled to bypass the kernel page cache, ensuring every read/write passes through the redaction handlers
 - Binary files are skipped (by extension and null-byte detection)
 - `.git`, `node_modules`, and `vendor` directories are skipped by default
-
-## eBPF vs FUSE Comparison
-
-| Aspect | eBPF version | FUSE version |
-|--------|-----------------|----------------------|
-| Platform | Linux only | Linux + macOS |
-| Privileges | Root required | User (fusermount) |
-| Transparency | Fully transparent | Agent uses mount path |
-| Syscall coverage | read/write only | All (mmap, pread, readv) |
-| Kernel taint | Yes | No |
-| Build deps | clang, bpftool, vmlinux.h | None (pure Go) |

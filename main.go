@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/cilium/ebpf"
@@ -21,8 +22,14 @@ type Rule struct {
 	Placeholder string `yaml:"placeholder"`
 }
 
+type EnvRule struct {
+	Name        string `yaml:"name"`
+	Placeholder string `yaml:"placeholder"`
+}
+
 type Config struct {
-	Rules []Rule `yaml:"rules"`
+	Rules    []Rule    `yaml:"rules"`
+	EnvRules []EnvRule `yaml:"env_rules"`
 }
 
 func loadConfig(path string) (*Config, error) {
@@ -36,26 +43,32 @@ func loadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
-	if len(cfg.Rules) == 0 {
+	if len(cfg.Rules) == 0 && len(cfg.EnvRules) == 0 {
 		return nil, fmt.Errorf("config has no rules")
 	}
-	if len(cfg.Rules) > 8 {
-		return nil, fmt.Errorf("too many rules: %d (max 8)", len(cfg.Rules))
+	if len(cfg.Rules) > 16 {
+		return nil, fmt.Errorf("too many rules: %d (max 16)", len(cfg.Rules))
 	}
 
 	for i, r := range cfg.Rules {
 		if len(r.Original) == 0 || len(r.Placeholder) == 0 {
 			return nil, fmt.Errorf("rule %d: original and placeholder must be non-empty", i)
 		}
-		if len(r.Original) > 16 {
-			return nil, fmt.Errorf("rule %d: original too long (%d bytes, max 16)", i, len(r.Original))
+		if len(r.Original) > 128 {
+			return nil, fmt.Errorf("rule %d: original too long (%d bytes, max 128)", i, len(r.Original))
 		}
-		if len(r.Placeholder) > 16 {
-			return nil, fmt.Errorf("rule %d: placeholder too long (%d bytes, max 16)", i, len(r.Placeholder))
+		if len(r.Placeholder) > 128 {
+			return nil, fmt.Errorf("rule %d: placeholder too long (%d bytes, max 128)", i, len(r.Placeholder))
 		}
 		if len(r.Original) != len(r.Placeholder) {
 			return nil, fmt.Errorf("rule %d: original (%d bytes) and placeholder (%d bytes) must be the same length",
 				i, len(r.Original), len(r.Placeholder))
+		}
+	}
+
+	for i, r := range cfg.EnvRules {
+		if len(r.Name) == 0 || len(r.Placeholder) == 0 {
+			return nil, fmt.Errorf("env_rule %d: name and placeholder must be non-empty", i)
 		}
 	}
 
@@ -64,6 +77,7 @@ func loadConfig(path string) (*Config, error) {
 
 func main() {
 	configPath := flag.String("config", "", "Path to redaction config YAML file")
+	rehydrateWrites := flag.Bool("rehydrate-writes", false, "Rehydrate placeholders back to originals on write syscalls (default off)")
 	flag.Parse()
 
 	if *configPath == "" {
@@ -81,14 +95,25 @@ func main() {
 		log.Fatalf("Config error: %v", err)
 	}
 
-	// Load eBPF objects
+	// Two-step BPF load: get spec, set variables, then load
+	spec, err := loadBpf()
+	if err != nil {
+		log.Fatalf("Loading BPF spec: %v", err)
+	}
+
+	if *rehydrateWrites {
+		if err := spec.Variables["rehydrate_writes"].Set(uint32(1)); err != nil {
+			log.Fatalf("Setting rehydrate_writes: %v", err)
+		}
+	}
+
 	var objs bpfObjects
 	opts := &ebpf.CollectionOptions{
 		Programs: ebpf.ProgramOptions{
 			LogSizeStart: 1 << 24, // 16MB verifier log
 		},
 	}
-	if err := loadBpfObjects(&objs, opts); err != nil {
+	if err := spec.LoadAndAssign(&objs, opts); err != nil {
 		log.Fatalf("Loading eBPF objects: %v", err)
 	}
 	defer objs.Close()
@@ -131,11 +156,14 @@ func main() {
 	}
 	defer tpExitRead.Close()
 
-	tpWrite, err := link.Tracepoint("syscalls", "sys_enter_write", objs.TracepointSysEnterWrite, nil)
-	if err != nil {
-		log.Fatalf("Attaching sys_enter_write: %v", err)
+	// Only attach write tracepoint when rehydration is enabled
+	if *rehydrateWrites {
+		tpWrite, err := link.Tracepoint("syscalls", "sys_enter_write", objs.TracepointSysEnterWrite, nil)
+		if err != nil {
+			log.Fatalf("Attaching sys_enter_write: %v", err)
+		}
+		defer tpWrite.Close()
 	}
-	defer tpWrite.Close()
 
 	tpFork, err := link.AttachTracing(link.TracingOptions{
 		Program: objs.HandleFork,
@@ -158,6 +186,21 @@ func main() {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
+	// Apply env var redaction
+	if len(cfg.EnvRules) > 0 {
+		env := os.Environ()
+		for i, e := range env {
+			for _, rule := range cfg.EnvRules {
+				prefix := rule.Name + "="
+				if strings.HasPrefix(e, prefix) {
+					env[i] = prefix + rule.Placeholder
+					break
+				}
+			}
+		}
+		cmd.Env = env
+	}
 
 	if err := cmd.Start(); err != nil {
 		log.Fatalf("Starting child process: %v", err)

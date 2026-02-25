@@ -5,8 +5,8 @@
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
 
-#define MAX_PATTERN_LEN 16
-#define MAX_PATTERNS    8
+#define MAX_PATTERN_LEN 128
+#define MAX_PATTERNS    16
 #define BUF_SIZE        4096
 #define BUF_MASK        (BUF_SIZE - 1)
 
@@ -61,6 +61,20 @@ struct {
 	__type(key, __u32);
 	__type(value, struct scratch_data);
 } scratch_buf SEC(".maps");
+
+/*
+ * Track which (pid, fd) pairs had redacted reads.
+ * Only rehydrate writes on fds where we previously redacted.
+ * Key = (pid << 32) | fd, value = 1.
+ */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 4096);
+	__type(key, __u64);
+	__type(value, __u8);
+} redacted_fds SEC(".maps");
+
+volatile const __u32 rehydrate_writes = 0;
 
 static __always_inline int is_target(void)
 {
@@ -270,23 +284,42 @@ int tracepoint_sys_exit_read(struct trace_event_raw_sys_exit *ctx)
 
 	__s64 ret = ctx->ret;
 	__u64 buf_ptr = info->buf_ptr;
+	__s64 fd = info->fd;
 	bpf_map_delete_elem(&active_reads, &tid);
 
 	if (ret <= 0)
 		return 0;
 
 	do_scan_and_replace(buf_ptr, (__u64)ret, 0);
+
+	/* Mark this (pid, fd) as having redacted data (only if rehydration is on) */
+	if (rehydrate_writes && fd > 2) {
+		__u32 pid = tid >> 32;
+		__u64 key = ((__u64)pid << 32) | (__u32)fd;
+		__u8 val = 1;
+		bpf_map_update_elem(&redacted_fds, &key, &val, BPF_ANY);
+	}
+
 	return 0;
 }
 
 SEC("tracepoint/syscalls/sys_enter_write")
 int tracepoint_sys_enter_write(struct trace_event_raw_sys_enter *ctx)
 {
+	if (!rehydrate_writes)
+		return 0;
+
 	if (!is_target())
 		return 0;
 
 	__s64 fd = ctx->args[0];
 	if (fd <= 2)
+		return 0;
+
+	/* Only rehydrate writes on fds that previously had redacted reads */
+	__u32 pid = bpf_get_current_pid_tgid() >> 32;
+	__u64 key = ((__u64)pid << 32) | (__u32)fd;
+	if (!bpf_map_lookup_elem(&redacted_fds, &key))
 		return 0;
 
 	do_scan_and_replace(ctx->args[1], ctx->args[2], 1);

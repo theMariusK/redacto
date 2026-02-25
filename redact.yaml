@@ -1,7 +1,15 @@
 rules:
+  - original: "sk-ant-api03-realkey1234567890abcdef"
+    placeholder: "sk-ant-api03-XXXXXXXXXXXXXXXXXXXXXXX"
+  - original: "password1234"
+    placeholder: "************"
   - original: "SecretCorp"
     placeholder: "REDACTED_1"
   - original: "api_key_12345"
     placeholder: "XXXXXXXXXXXXX"
-  - original: "password1234"
-    placeholder: "************"
+
+env_rules:
+  - name: "ANTHROPIC_API_KEY"
+    placeholder: "REDACTED"
+  - name: "AWS_SECRET_ACCESS_KEY"
+    placeholder: "REDACTED"

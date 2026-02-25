@@ -1,8 +1,8 @@
 # redacto
 
-eBPF-based transparent string redaction tool. Wraps a child process and intercepts its `read`/`write` syscalls to redact sensitive strings on the read path and rehydrate them on the write path, based on a YAML config.
+eBPF-based transparent string redaction tool. Wraps a child process and intercepts its `read` syscalls to redact sensitive strings, based on a YAML config. Optionally rehydrates placeholders back to originals on the write path.
 
-The child process sees redacted data; files on disk remain unchanged.
+The child process sees redacted data; files on disk remain unchanged (unless `--rehydrate-writes` is used).
 
 ## How it works
 
@@ -11,17 +11,19 @@ redact.yaml --> Go orchestrator --> Launch child (e.g. cat secret.txt)
                      |
                      +-- Populates BPF pattern map
                      +-- Populates PID target map
+                     +-- Redacts env vars (userspace)
                      +-- Attaches eBPF programs:
                          sys_enter_read  -> store buf pointer
                          sys_exit_read   -> scan & redact (original -> placeholder)
-                         sys_enter_write -> scan & rehydrate (placeholder -> original, fd>2 only)
+                         sys_enter_write -> scan & rehydrate (only with --rehydrate-writes)
                          sched_process_fork -> track child PIDs
                          sched_process_exit -> cleanup PIDs
 ```
 
 - **Read path**: kernel fills buffer, eBPF scans for sensitive strings, overwrites with placeholders via `bpf_probe_write_user`. The child sees redacted data.
-- **Write path** (fd > 2): child writes buffer, eBPF scans for placeholders, overwrites with originals. Files on disk get clean data.
+- **Write path** (fd > 2, opt-in): with `--rehydrate-writes`, child writes buffer, eBPF scans for placeholders, overwrites with originals. Files on disk get clean data.
 - **stdout/stderr** (fd 0-2): write hook skips them, so terminal output stays redacted.
+- **Env vars**: replaced in userspace before the child process starts. No same-length constraint.
 
 ## Requirements
 
@@ -47,18 +49,33 @@ Create a YAML config file with redaction rules:
 
 ```yaml
 rules:
-  - original: "SecretCorp"
-    placeholder: "REDACTED_1"
-  - original: "api_key_12345"
-    placeholder: "XXXXXXXXXXXXX"
+  - original: "sk-ant-api03-realkey1234567890abcdef"
+    placeholder: "sk-ant-api03-XXXXXXXXXXXXXXXXXXXXXXX"
   - original: "password1234"
     placeholder: "************"
+
+env_rules:
+  - name: "ANTHROPIC_API_KEY"
+    placeholder: "REDACTED"
+  - name: "AWS_SECRET_ACCESS_KEY"
+    placeholder: "REDACTED"
 ```
+
+### BPF rules (`rules`)
+
+These intercept `read()` syscalls via eBPF to redact data in-flight.
 
 Constraints:
 - Original and placeholder must be the **same length**
-- Max 16 bytes per pattern
-- Max 8 rules
+- Max 128 bytes per pattern
+- Max 16 rules
+
+### Environment rules (`env_rules`)
+
+These replace environment variable values in userspace before the child process starts. Useful for secrets passed via env vars (e.g. API keys), which are read from the process stack and never go through `read()`.
+
+- No same-length constraint (userspace replacement)
+- No limit on number of env rules
 
 ## Usage
 
@@ -69,20 +86,34 @@ sudo ./redacto --config redact.yaml -- cat /tmp/secret.txt
 # Wrap an interactive shell (all child processes are tracked)
 sudo ./redacto --config redact.yaml -- bash
 
-# Wrap a file copy (write rehydration preserves originals on disk)
+# File copy without rehydration (copy contains redacted content)
 sudo ./redacto --config redact.yaml -- cp /tmp/secret.txt /tmp/copy.txt
+
+# File copy with rehydration (copy contains original content)
+sudo ./redacto --config redact.yaml --rehydrate-writes -- cp /tmp/secret.txt /tmp/copy.txt
+
+# Env var redaction
+ANTHROPIC_API_KEY=sk-real sudo ./redacto --config redact.yaml -- printenv ANTHROPIC_API_KEY
+# Output: REDACTED
 ```
+
+## Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | (required) | Path to redaction config YAML file |
+| `--rehydrate-writes` | `false` | Rehydrate placeholders back to originals on write syscalls (fd > 2) |
 
 ## Example
 
 ```bash
-$ echo "The company SecretCorp has api_key_12345 access" > /tmp/test.txt
+$ echo "The company has sk-ant-api03-realkey1234567890abcdef access" > /tmp/test.txt
 
 $ sudo ./redacto --config redact.yaml -- cat /tmp/test.txt
-The company REDACTED_1 has XXXXXXXXXXXXX access
+The company has sk-ant-api03-XXXXXXXXXXXXXXXXXXXXXXX access
 
 $ cat /tmp/test.txt
-The company SecretCorp has api_key_12345 access
+The company has sk-ant-api03-realkey1234567890abcdef access
 ```
 
 ## Limitations
@@ -91,4 +122,4 @@ The company SecretCorp has api_key_12345 access
 - Patterns spanning two successive `read()` calls won't be detected
 - Only hooks `read`/`write` (not `readv`/`writev`/`pread64`/`mmap`)
 - `bpf_probe_write_user` taints the kernel (prints warning to dmesg)
-- Write rehydration modifies the userspace buffer (acceptable for single-use buffers like `cat`/`cp`)
+- Write rehydration (when enabled) modifies the userspace buffer (acceptable for single-use buffers like `cat`/`cp`)

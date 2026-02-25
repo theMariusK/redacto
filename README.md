@@ -49,10 +49,12 @@ Create a YAML config file. By default, `redacto` looks for `~/.redacto.yaml`. Ov
 
 ```yaml
 rules:
+  # Placeholder is optional — if omitted, a deterministic hash is auto-generated
   - original: "sk-ant-api03-realkey1234567890abcdef"
-    placeholder: "sk-ant-api03-XXXXXXXXXXXXXXXXXXXXXXX"
   - original: "password1234"
-    placeholder: "************"
+  # You can still specify an explicit placeholder if you prefer
+  - original: "SecretCorp"
+    placeholder: "REDACT_001"
 
 env_rules:
   - name: "ANTHROPIC_API_KEY"
@@ -65,8 +67,8 @@ env_rules:
 
 These intercept `read()` syscalls via eBPF to redact data in-flight.
 
-Constraints:
-- Original and placeholder must be the **same length**
+- `placeholder` is **optional**. If omitted, a deterministic same-length hex string is generated from a SHA-256 hash of the original. This means you only need to list the strings to redact.
+- If specified, original and placeholder must be the **same length**
 - Max 128 bytes per pattern
 - Max 16 rules
 

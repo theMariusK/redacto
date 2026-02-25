@@ -3,6 +3,8 @@ package main
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -type pattern_entry bpf redactor.c
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log"
@@ -18,6 +20,19 @@ import (
 	"github.com/cilium/ebpf/link"
 	"gopkg.in/yaml.v3"
 )
+
+// generatePlaceholder creates a deterministic same-length placeholder from the
+// original string using a SHA-256 hash, encoded as hex. The hash is repeated
+// as needed to match the original length.
+func generatePlaceholder(original string) string {
+	h := sha256.Sum256([]byte(original))
+	hexStr := hex.EncodeToString(h[:])
+	// Repeat hex string to cover any length up to 128
+	for len(hexStr) < len(original) {
+		hexStr += hexStr
+	}
+	return hexStr[:len(original)]
+}
 
 type Rule struct {
 	Original    string `yaml:"original"`
@@ -52,12 +67,16 @@ func loadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("too many rules: %d (max 16)", len(cfg.Rules))
 	}
 
-	for i, r := range cfg.Rules {
-		if len(r.Original) == 0 || len(r.Placeholder) == 0 {
-			return nil, fmt.Errorf("rule %d: original and placeholder must be non-empty", i)
+	for i := range cfg.Rules {
+		r := &cfg.Rules[i]
+		if len(r.Original) == 0 {
+			return nil, fmt.Errorf("rule %d: original must be non-empty", i)
 		}
 		if len(r.Original) > 128 {
 			return nil, fmt.Errorf("rule %d: original too long (%d bytes, max 128)", i, len(r.Original))
+		}
+		if len(r.Placeholder) == 0 {
+			r.Placeholder = generatePlaceholder(r.Original)
 		}
 		if len(r.Placeholder) > 128 {
 			return nil, fmt.Errorf("rule %d: placeholder too long (%d bytes, max 128)", i, len(r.Placeholder))

@@ -78,14 +78,50 @@ func loadConfig(path string) (*Config, error) {
 }
 
 func main() {
-	configPath := flag.String("config", "", "Path to redaction config YAML file")
-	rehydrateWrites := flag.Bool("rehydrate-writes", false, "Rehydrate placeholders back to originals on write syscalls (default off)")
-	projectDir := flag.String("project-dir", "", "Only redact reads from files under this directory (default: redact all files)")
-	runAsUser := flag.String("user", "", "Run the child process as this user (drop privileges from root)")
+	configPath := flag.String("config", "", "Path to redaction config YAML file (default: ~/.redacto.yaml)")
+	noRehydrateWrites := flag.Bool("no-rehydrate-writes", false, "Disable rehydrating placeholders back to originals on write syscalls")
+	projectDir := flag.String("project-dir", "", "Only redact reads from files under this directory (default: current working directory)")
+	runAsUser := flag.String("user", "", "Run the child process as this user (default: $SUDO_USER)")
 	flag.Parse()
 
+	// Default --user to the user who invoked sudo
+	if *runAsUser == "" {
+		if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+			*runAsUser = sudoUser
+		}
+	}
+
+	// Default --project-dir to current working directory
+	if *projectDir == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			log.Fatalf("Cannot determine working directory: %v", err)
+		}
+		*projectDir = wd
+	}
+
+	// Resolve config path: explicit flag > ~/.redacto.yaml
 	if *configPath == "" {
-		log.Fatal("Usage: redacto --config <config.yaml> -- <command> [args...]")
+		var home string
+		if *runAsUser != "" {
+			u, err := user.Lookup(*runAsUser)
+			if err != nil {
+				log.Fatalf("Looking up user %q for config path: %v", *runAsUser, err)
+			}
+			home = u.HomeDir
+		} else {
+			var err error
+			home, err = os.UserHomeDir()
+			if err != nil {
+				log.Fatalf("Cannot determine home directory: %v", err)
+			}
+		}
+		defaultPath := home + "/.redacto.yaml"
+		if _, err := os.Stat(defaultPath); err == nil {
+			*configPath = defaultPath
+		} else {
+			log.Fatalf("No config specified and %s not found. Usage: redacto [--config <config.yaml>] -- <command> [args...]", defaultPath)
+		}
 	}
 
 	args := flag.Args()
@@ -105,7 +141,7 @@ func main() {
 		log.Fatalf("Loading BPF spec: %v", err)
 	}
 
-	if *rehydrateWrites {
+	if !*noRehydrateWrites {
 		if err := spec.Variables["rehydrate_writes"].Set(uint32(1)); err != nil {
 			log.Fatalf("Setting rehydrate_writes: %v", err)
 		}
@@ -187,8 +223,8 @@ func main() {
 	}
 	defer tpExitRead.Close()
 
-	// Only attach write tracepoint when rehydration is enabled
-	if *rehydrateWrites {
+	// Attach write tracepoint unless rehydration is disabled
+	if !*noRehydrateWrites {
 		tpWrite, err := link.Tracepoint("syscalls", "sys_enter_write", objs.TracepointSysEnterWrite, nil)
 		if err != nil {
 			log.Fatalf("Attaching sys_enter_write: %v", err)

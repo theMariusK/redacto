@@ -59,12 +59,19 @@ Default config lives at `~/.redacto.yaml`:
 
 ```yaml
 rules:
+  # Literal rules — exact string match
   - original: "sk-ant-api03-realkey1234567890abcdef"
     placeholder: "sk-ant-api03-XXXXXXXXXXXXXXXXXXXXXXX"
   - original: "password1234"
     placeholder: "************"
   - original: "SecretCorp"
     # placeholder auto-generated (SHA-256 hex, same length)
+
+  # Regex rules — match by pattern, placeholder auto-generated per match
+  - pattern: "ghp_[A-Za-z0-9]{36}"            # GitHub personal access tokens
+  - pattern: "sk-ant-api03-[A-Za-z0-9]{24}"   # Anthropic API keys
+  - pattern: "AKIA[0-9A-Z]{16}"               # AWS access key IDs
+  - pattern: "[A-Fa-f0-9]{40}"                # 40-char hex strings (SHA-1, tokens)
 
 env_rules:
   - name: "ANTHROPIC_API_KEY"
@@ -75,9 +82,19 @@ skip_extensions: [".bin", ".dat"]
 skip_paths: [".cache", "build"]
 ```
 
-### Constraints
+### Rule types
 
-- **Same-length**: `original` and `placeholder` must be the same byte length (auto-generated placeholders satisfy this)
+Each rule must have exactly one of `original` or `pattern`.
+
+**Literal rules** (`original`):
+- Exact string match
+- `placeholder` is optional — if omitted, a deterministic same-length hex string is auto-generated
+- If specified, `original` and `placeholder` must be the same byte length
+
+**Regex rules** (`pattern`):
+- Uses [Go regex syntax](https://pkg.go.dev/regexp/syntax)
+- `placeholder` is ignored — a deterministic same-length placeholder is auto-generated per match
+- Matched text is stored for rehydration (mappings accumulate for the scanner's lifetime)
 
 ## How It Works
 

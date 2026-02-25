@@ -99,7 +99,10 @@ func main() {
 		log.Fatalf("Config error: %v", err)
 	}
 
-	scanner := NewScanner(cfg.Rules)
+	scanner, err := NewScanner(cfg.Rules)
+	if err != nil {
+		log.Fatalf("Scanner error: %v", err)
+	}
 
 	// Build skip extension set.
 	skipExts := make(map[string]bool)

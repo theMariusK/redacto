@@ -25,6 +25,7 @@ func generatePlaceholder(original string) string {
 type Rule struct {
 	Original    string `yaml:"original"`
 	Placeholder string `yaml:"placeholder"`
+	Pattern     string `yaml:"pattern"`
 }
 
 type EnvRule struct {
@@ -56,9 +57,20 @@ func loadConfig(path string) (*Config, error) {
 
 	for i := range cfg.Rules {
 		r := &cfg.Rules[i]
-		if len(r.Original) == 0 {
-			return nil, fmt.Errorf("rule %d: original must be non-empty", i)
+		hasOriginal := len(r.Original) > 0
+		hasPattern := len(r.Pattern) > 0
+
+		if hasOriginal == hasPattern {
+			return nil, fmt.Errorf("rule %d: must have exactly one of 'original' or 'pattern'", i)
 		}
+
+		if hasPattern {
+			// Regex rule: placeholder is ignored (generated per-match at scan time).
+			// Compile check happens in NewScanner.
+			continue
+		}
+
+		// Literal rule
 		if len(r.Placeholder) == 0 {
 			r.Placeholder = generatePlaceholder(r.Original)
 		}

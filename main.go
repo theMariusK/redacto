@@ -20,18 +20,45 @@ func main() {
 	debug := flag.Bool("debug", false, "Enable FUSE debug logging")
 	flag.Parse()
 
-	args := flag.Args()
+	// Determine mode: exec mode (has --) or mount-only mode.
+	// Find "--" in os.Args to split positional args from child command.
+	var childArgs []string
+	var positionalArgs []string
+	execMode := false
 
-	// Determine source dir and child command.
-	// Usage: redacto [flags] <source-dir> [-- command args...]
-	// or:   redacto [flags] <source-dir> <mount-dir>
-	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "Usage: redacto [flags] <source-dir> [-- command args...]\n")
-		fmt.Fprintf(os.Stderr, "       redacto [flags] <source-dir> <mount-dir>\n")
-		os.Exit(1)
+	dashIdx := -1
+	for i, a := range os.Args {
+		if a == "--" {
+			dashIdx = i
+			break
+		}
 	}
 
-	sourceDir := args[0]
+	if dashIdx >= 0 && dashIdx+1 < len(os.Args) {
+		execMode = true
+		childArgs = os.Args[dashIdx+1:]
+		// Positional args are the flag.Args() entries that appear before "--".
+		// flag.Args() includes everything after flags, including post-"--" args.
+		// We know how many child args there are, so take the rest.
+		allArgs := flag.Args()
+		if len(allArgs) > len(childArgs) {
+			positionalArgs = allArgs[:len(allArgs)-len(childArgs)]
+		}
+	} else {
+		positionalArgs = flag.Args()
+	}
+
+	// Determine source dir. Default to current working directory.
+	var sourceDir string
+	if len(positionalArgs) > 0 {
+		sourceDir = positionalArgs[0]
+	} else {
+		wd, err := os.Getwd()
+		if err != nil {
+			log.Fatalf("Cannot determine working directory: %v", err)
+		}
+		sourceDir = wd
+	}
 
 	// Validate source directory.
 	fi, err := os.Stat(sourceDir)
@@ -42,22 +69,14 @@ func main() {
 		log.Fatalf("Source %q is not a directory", sourceDir)
 	}
 
-	// Determine mode: exec mode (has --) or mount-only mode.
-	var childArgs []string
-	execMode := false
-
-	// Check if there's a "--" separator in os.Args to detect exec mode.
-	for i, a := range os.Args {
-		if a == "--" && i+1 < len(os.Args) {
-			childArgs = os.Args[i+1:]
-			execMode = true
-			break
-		}
+	// If not exec mode, check for second positional arg as mount dir.
+	if !execMode && len(positionalArgs) >= 2 {
+		*mountDir = positionalArgs[1]
 	}
 
-	// If not exec mode, check for second positional arg as mount dir.
-	if !execMode && len(args) >= 2 {
-		*mountDir = args[1]
+	if execMode && len(childArgs) == 0 {
+		fmt.Fprintf(os.Stderr, "No command specified after --\n")
+		os.Exit(1)
 	}
 
 	// Resolve config path.

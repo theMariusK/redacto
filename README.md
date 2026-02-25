@@ -31,6 +31,9 @@ make build
 # Mount, launch agent inside mount, unmount on exit
 redacto /home/user/project -- gemini
 
+# Source dir defaults to current directory if omitted
+redacto -- gemini
+
 # With explicit config
 redacto --config /path/to/redact.yaml /home/user/project -- claude-code
 ```
@@ -42,6 +45,9 @@ The child process runs with its working directory set to the mount point. All fi
 ```bash
 # Mount and wait for Ctrl+C
 redacto /home/user/project /mnt/redacted
+
+# Source dir defaults to current directory
+redacto /mnt/redacted
 
 # With auto temp mount dir
 redacto --mount-dir /tmp/mymount /home/user/project
@@ -108,7 +114,7 @@ AI Agent (works in /mnt/redacted)
 
 ## eBPF vs FUSE Comparison
 
-| Aspect | eBPF (`redacto`) | FUSE (`redacto`) |
+| Aspect | eBPF version | FUSE version |
 |--------|-----------------|----------------------|
 | Platform | Linux only | Linux + macOS |
 | Privileges | Root required | User (fusermount) |

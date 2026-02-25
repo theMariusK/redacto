@@ -1,12 +1,10 @@
 module redacto
 
-go 1.24.0
-
-toolchain go1.24.3
+go 1.22
 
 require (
-	github.com/cilium/ebpf v0.20.0
+	github.com/hanwen/go-fuse/v2 v2.7.2
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require golang.org/x/sys v0.37.0 // indirect
+require golang.org/x/sys v0.29.0 // indirect

@@ -1,15 +1,12 @@
-.PHONY: all clean generate build
+.PHONY: build test clean
 
-all: vmlinux.h generate build
+BINARY := redacto
 
-vmlinux.h:
-	bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
+build:
+	go build -o $(BINARY) .
 
-generate: vmlinux.h
-	go generate ./...
-
-build: generate
-	go build -o redacto .
+test:
+	go test -v ./...
 
 clean:
-	rm -f vmlinux.h bpf_*.go bpf_*.o redacto
+	rm -f $(BINARY)

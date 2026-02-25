@@ -1,140 +1,118 @@
 # redacto
 
-eBPF-based transparent string redaction tool. Wraps a child process and intercepts its `read` syscalls to redact sensitive strings, based on a YAML config. Rehydrates placeholders back to originals on the write path by default, so files on disk remain unchanged.
+FUSE-based cross-platform file redaction tool. Mounts a virtual filesystem overlay that mirrors a real project directory, redacting secrets on read and rehydrating them on write.
 
-The child process sees redacted data; files on disk remain unchanged.
+## Features
 
-## How it works
-
-```
-redact.yaml --> Go orchestrator --> Launch child (e.g. cat secret.txt)
-                     |
-                     +-- Populates BPF pattern map
-                     +-- Populates PID target map
-                     +-- Redacts env vars (userspace)
-                     +-- Attaches eBPF programs:
-                         sys_enter_read  -> store buf pointer
-                         sys_exit_read   -> scan & redact (original -> placeholder)
-                         sys_enter_write -> scan & rehydrate (unless --no-rehydrate-writes)
-                         sched_process_fork -> track child PIDs
-                         sched_process_exit -> cleanup PIDs
-```
-
-- **Read path**: kernel fills buffer, eBPF scans for sensitive strings, overwrites with placeholders via `bpf_probe_write_user`. The child sees redacted data.
-- **Write path** (fd > 2, on by default): eBPF scans write buffers for placeholders and overwrites with originals, so files on disk keep clean data. When `--project-dir` is set, writes to any file under the project directory are rehydrated; without it, only writes to fds that previously had redacted reads are rehydrated. Disable with `--no-rehydrate-writes`.
-- **stdout/stderr** (fd 0-2): write hook skips them, so terminal output stays redacted.
-- **Env vars**: replaced in userspace before the child process starts. No same-length constraint.
+- **Cross-platform**: Works on Linux and macOS (no root required)
+- **No kernel taint**: Pure userspace, no eBPF
+- **All access patterns**: Handles mmap, pread, readv automatically via FUSE
+- **Same config format**: Compatible with `redacto` YAML config (`~/.redacto.yaml`)
+- **Binary file detection**: Skips binary files by extension and content sniffing
+- **Exec mode**: Mount, run a command inside the mount, unmount on exit
 
 ## Requirements
 
-- Linux kernel >= 5.17 (uses `bpf_loop` helper)
-- Go 1.24+
-- `bpftool`, `clang`, `llvm` (for eBPF compilation)
-- Root privileges (eBPF + `bpf_probe_write_user`)
+- Go 1.22+
+- Linux: `libfuse3-dev` (or `fuse3` package)
+- macOS: [macFUSE](https://osxfuse.github.io/) or [FUSE-T](https://www.fuse-t.org/)
 
 ## Build
 
 ```bash
-make
+make build
 ```
 
-This will:
-1. Generate `vmlinux.h` from kernel BTF
-2. Compile `redactor.c` via `bpf2go`
-3. Build the `redacto` binary
+## Usage
 
-## Configuration
+### Exec mode (recommended for AI agents)
 
-Create a YAML config file. By default, `redacto` looks for `~/.redacto.yaml`. Override with `--config`.
+```bash
+# Mount, launch agent inside mount, unmount on exit
+redacto /home/user/project -- gemini
+
+# With explicit config
+redacto --config /path/to/redact.yaml /home/user/project -- claude-code
+```
+
+The child process runs with its working directory set to the mount point. All file reads return redacted content; writes are rehydrated back to originals.
+
+### Mount-only mode
+
+```bash
+# Mount and wait for Ctrl+C
+redacto /home/user/project /mnt/redacted
+
+# With auto temp mount dir
+redacto --mount-dir /tmp/mymount /home/user/project
+```
+
+### Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--config PATH` | Config YAML path | `~/.redacto.yaml` |
+| `--mount-dir PATH` | Explicit mount point | auto temp dir |
+| `--no-rehydrate-writes` | Disable write rehydration | false |
+| `--debug` | FUSE debug logging | false |
+
+## Config Format
+
+Same as `redacto` — your existing `~/.redacto.yaml` works:
 
 ```yaml
 rules:
-  # Placeholder is optional — if omitted, a deterministic hash is auto-generated
   - original: "sk-ant-api03-realkey1234567890abcdef"
+    placeholder: "sk-ant-api03-XXXXXXXXXXXXXXXXXXXXXXX"
   - original: "password1234"
-  # You can still specify an explicit placeholder if you prefer
+    placeholder: "************"
   - original: "SecretCorp"
-    placeholder: "REDACT_001"
+    # placeholder auto-generated (SHA-256 hex, same length)
 
 env_rules:
   - name: "ANTHROPIC_API_KEY"
     placeholder: "REDACTED"
-  - name: "AWS_SECRET_ACCESS_KEY"
-    placeholder: "REDACTED"
+
+# Optional: additional extensions/paths to skip
+skip_extensions: [".bin", ".dat"]
+skip_paths: [".cache", "build"]
 ```
 
-### BPF rules (`rules`)
+### Constraints
 
-These intercept `read()` syscalls via eBPF to redact data in-flight.
+- **Same-length**: `original` and `placeholder` must be the same byte length (auto-generated placeholders satisfy this)
+- **No rule count limit**: Unlike the eBPF version, there is no 16-rule or 128-byte limit
 
-- `placeholder` is **optional**. If omitted, a deterministic same-length hex string is generated from a SHA-256 hash of the original. This means you only need to list the strings to redact.
-- If specified, original and placeholder must be the **same length**
-- Max 128 bytes per pattern
-- Max 16 rules
+## How It Works
 
-### Environment rules (`env_rules`)
-
-These replace environment variable values in userspace before the child process starts. Useful for secrets passed via env vars (e.g. API keys), which are read from the process stack and never go through `read()`.
-
-- No same-length constraint (userspace replacement)
-- No limit on number of env rules
-
-## Usage
-
-```bash
-# Basic: redact output of a command
-sudo ./redacto --config redact.yaml -- cat /tmp/secret.txt
-
-# Wrap an interactive shell (all child processes are tracked)
-sudo ./redacto --config redact.yaml -- bash
-
-# File copy (rehydration is on by default, copy contains original content)
-sudo ./redacto --config redact.yaml -- cp /tmp/secret.txt /tmp/copy.txt
-
-# File copy without rehydration (copy contains redacted content)
-sudo ./redacto --config redact.yaml --no-rehydrate-writes -- cp /tmp/secret.txt /tmp/copy.txt
-
-# Only redact files under a specific project directory
-# Files outside the project dir pass through untouched
-sudo ./redacto --config redact.yaml --project-dir /home/user/project -- cat /home/user/project/secret.txt
-# Output: redacted
-
-sudo ./redacto --config redact.yaml --project-dir /home/user/project -- cat /tmp/outside.txt
-# Output: NOT redacted (file is outside project dir)
-
-# Run an AI agent with redaction — drop privileges so the agent runs as your user
-sudo ./redacto --config redact.yaml --project-dir /home/user/project --user myuser -- gemini
-
-# Env var redaction
-ANTHROPIC_API_KEY=sk-real sudo ./redacto --config redact.yaml -- printenv ANTHROPIC_API_KEY
-# Output: REDACTED
+```
+AI Agent (works in /mnt/redacted)
+            |
+    reads/writes files
+            |
+    Kernel VFS (FUSE)
+            |
+    redacto daemon (Go, userspace)
+        |                   |
+    Read handler:       Write handler:
+    pread(real_fd)      scan for placeholders
+    scan & redact       replace with originals
+    return redacted     pwrite(real_fd)
+        |                   |
+    Real Filesystem (/home/user/project)
 ```
 
-## Flags
+- `direct_io` is enabled to bypass the kernel page cache, ensuring every read/write passes through the redaction handlers
+- Binary files are skipped (by extension and null-byte detection)
+- `.git`, `node_modules`, and `vendor` directories are skipped by default
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--config` | `~/.redacto.yaml` | Path to redaction config YAML file. Falls back to `~/.redacto.yaml` if not specified. |
-| `--no-rehydrate-writes` | `false` | Disable rehydrating placeholders back to originals on write syscalls (fd > 2). Rehydration is on by default. |
-| `--project-dir` | current directory | Only redact reads from files under this directory. |
-| `--user` | `$SUDO_USER` | Run the child process as this user. Defaults to the user who invoked `sudo`, so the child finds its config/auth files under the correct `$HOME`. |
+## eBPF vs FUSE Comparison
 
-## Example
-
-```bash
-$ echo "The company has sk-ant-api03-realkey1234567890abcdef access" > /tmp/test.txt
-
-$ sudo ./redacto --config redact.yaml -- cat /tmp/test.txt
-The company has sk-ant-api03-XXXXXXXXXXXXXXXXXXXXXXX access
-
-$ cat /tmp/test.txt
-The company has sk-ant-api03-realkey1234567890abcdef access
-```
-
-## Limitations
-
-- Max 4096 bytes scanned per syscall
-- Patterns spanning two successive `read()` calls won't be detected
-- Only hooks `read`/`write` (not `readv`/`writev`/`pread64`/`mmap`)
-- `bpf_probe_write_user` taints the kernel (prints warning to dmesg)
-- Write rehydration (when enabled) modifies the userspace buffer (acceptable for single-use buffers like `cat`/`cp`)
+| Aspect | eBPF (`redacto`) | FUSE (`redacto`) |
+|--------|-----------------|----------------------|
+| Platform | Linux only | Linux + macOS |
+| Privileges | Root required | User (fusermount) |
+| Transparency | Fully transparent | Agent uses mount path |
+| Syscall coverage | read/write only | All (mmap, pread, readv) |
+| Kernel taint | Yes | No |
+| Build deps | clang, bpftool, vmlinux.h | None (pure Go) |

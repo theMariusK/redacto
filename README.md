@@ -21,7 +21,7 @@ redact.yaml --> Go orchestrator --> Launch child (e.g. cat secret.txt)
 ```
 
 - **Read path**: kernel fills buffer, eBPF scans for sensitive strings, overwrites with placeholders via `bpf_probe_write_user`. The child sees redacted data.
-- **Write path** (fd > 2, opt-in): with `--rehydrate-writes`, child writes buffer, eBPF scans for placeholders, overwrites with originals. Files on disk get clean data.
+- **Write path** (fd > 2, opt-in): with `--rehydrate-writes`, eBPF scans write buffers for placeholders and overwrites with originals. Files on disk get clean data. When `--project-dir` is set, writes to any file under the project directory are rehydrated; without it, only writes to fds that previously had redacted reads are rehydrated.
 - **stdout/stderr** (fd 0-2): write hook skips them, so terminal output stays redacted.
 - **Env vars**: replaced in userspace before the child process starts. No same-length constraint.
 
@@ -92,6 +92,17 @@ sudo ./redacto --config redact.yaml -- cp /tmp/secret.txt /tmp/copy.txt
 # File copy with rehydration (copy contains original content)
 sudo ./redacto --config redact.yaml --rehydrate-writes -- cp /tmp/secret.txt /tmp/copy.txt
 
+# Only redact files under a specific project directory
+# Files outside the project dir pass through untouched
+sudo ./redacto --config redact.yaml --project-dir /home/user/project -- cat /home/user/project/secret.txt
+# Output: redacted
+
+sudo ./redacto --config redact.yaml --project-dir /home/user/project -- cat /tmp/outside.txt
+# Output: NOT redacted (file is outside project dir)
+
+# Run an AI agent with redaction — drop privileges so the agent runs as your user
+sudo ./redacto --config redact.yaml --project-dir /home/user/project --rehydrate-writes --user myuser -- gemini
+
 # Env var redaction
 ANTHROPIC_API_KEY=sk-real sudo ./redacto --config redact.yaml -- printenv ANTHROPIC_API_KEY
 # Output: REDACTED
@@ -103,6 +114,8 @@ ANTHROPIC_API_KEY=sk-real sudo ./redacto --config redact.yaml -- printenv ANTHRO
 |------|---------|-------------|
 | `--config` | (required) | Path to redaction config YAML file |
 | `--rehydrate-writes` | `false` | Rehydrate placeholders back to originals on write syscalls (fd > 2) |
+| `--project-dir` | (empty) | Only redact reads from files under this directory. When unset, all file reads are redacted. |
+| `--user` | (empty) | Run the child process as this user (drops privileges from root). Useful with `sudo` so the child finds its config/auth files under the correct `$HOME`. |
 
 ## Example
 

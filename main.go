@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -78,6 +80,8 @@ func loadConfig(path string) (*Config, error) {
 func main() {
 	configPath := flag.String("config", "", "Path to redaction config YAML file")
 	rehydrateWrites := flag.Bool("rehydrate-writes", false, "Rehydrate placeholders back to originals on write syscalls (default off)")
+	projectDir := flag.String("project-dir", "", "Only redact reads from files under this directory (default: redact all files)")
+	runAsUser := flag.String("user", "", "Run the child process as this user (drop privileges from root)")
 	flag.Parse()
 
 	if *configPath == "" {
@@ -105,6 +109,33 @@ func main() {
 		if err := spec.Variables["rehydrate_writes"].Set(uint32(1)); err != nil {
 			log.Fatalf("Setting rehydrate_writes: %v", err)
 		}
+	}
+
+	if *projectDir != "" {
+		fi, err := os.Stat(*projectDir)
+		if err != nil {
+			log.Fatalf("Stat project-dir %q: %v", *projectDir, err)
+		}
+		if !fi.IsDir() {
+			log.Fatalf("--project-dir %q is not a directory", *projectDir)
+		}
+		stat, ok := fi.Sys().(*syscall.Stat_t)
+		if !ok {
+			log.Fatal("Failed to get syscall.Stat_t from os.Stat (unsupported platform?)")
+		}
+		// Convert userspace dev_t (new_encode_dev format) to kernel-internal
+		// MKDEV format. Userspace: (minor&0xff) | (major<<8) | ((minor&~0xff)<<12)
+		// Kernel: (major<<20) | minor
+		major := (stat.Dev & 0xfff00) >> 8
+		minor := (stat.Dev & 0xff) | ((stat.Dev >> 12) & 0xfff00)
+		kernelDev := (major << 20) | minor
+		if err := spec.Variables["project_dev"].Set(kernelDev); err != nil {
+			log.Fatalf("Setting project_dev: %v", err)
+		}
+		if err := spec.Variables["project_ino"].Set(stat.Ino); err != nil {
+			log.Fatalf("Setting project_ino: %v", err)
+		}
+		log.Printf("Project-dir filtering enabled: %s (dev=%d, ino=%d, kernelDev=%d)", *projectDir, stat.Dev, stat.Ino, kernelDev)
 	}
 
 	var objs bpfObjects
@@ -187,9 +218,39 @@ func main() {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
+	// Drop privileges for child process if --user is set
+	if *runAsUser != "" {
+		u, err := user.Lookup(*runAsUser)
+		if err != nil {
+			log.Fatalf("Looking up user %q: %v", *runAsUser, err)
+		}
+		uid, err := strconv.ParseUint(u.Uid, 10, 32)
+		if err != nil {
+			log.Fatalf("Parsing UID %q: %v", u.Uid, err)
+		}
+		gid, err := strconv.ParseUint(u.Gid, 10, 32)
+		if err != nil {
+			log.Fatalf("Parsing GID %q: %v", u.Gid, err)
+		}
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Credential: &syscall.Credential{
+				Uid: uint32(uid),
+				Gid: uint32(gid),
+			},
+		}
+		cmd.Env = append(os.Environ(),
+			"HOME="+u.HomeDir,
+			"USER="+u.Username,
+		)
+		log.Printf("Child process will run as user %s (uid=%d, gid=%d)", u.Username, uid, gid)
+	}
+
 	// Apply env var redaction
+	env := cmd.Env
+	if env == nil {
+		env = os.Environ()
+	}
 	if len(cfg.EnvRules) > 0 {
-		env := os.Environ()
 		for i, e := range env {
 			for _, rule := range cfg.EnvRules {
 				prefix := rule.Name + "="
@@ -199,8 +260,8 @@ func main() {
 				}
 			}
 		}
-		cmd.Env = env
 	}
+	cmd.Env = env
 
 	if err := cmd.Start(); err != nil {
 		log.Fatalf("Starting child process: %v", err)

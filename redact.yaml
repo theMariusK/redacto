@@ -4,9 +4,7 @@ rules:
   - original: "password1234"
     placeholder: "************"
   - original: "SecretCorp"
-    placeholder: "REDACTED_1"
-  - original: "api_key_12345"
-    placeholder: "XXXXXXXXXXXXX"
+    placeholder: "REDACT_001"
 
 env_rules:
   - name: "ANTHROPIC_API_KEY"

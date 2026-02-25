@@ -1,0 +1,7 @@
+rules:
+  - original: "SecretCorp"
+    placeholder: "REDACTED_1"
+  - original: "api_key_12345"
+    placeholder: "XXXXXXXXXXXXX"
+  - original: "password1234"
+    placeholder: "************"

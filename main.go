@@ -17,6 +17,7 @@ func main() {
 	configPath := flag.String("config", "", "Path to redaction config YAML (default: ~/.redacto.yaml)")
 	mountDir := flag.String("mount-dir", "", "Explicit mount point (default: auto temp dir)")
 	noRehydrateWrites := flag.Bool("no-rehydrate-writes", false, "Disable write rehydration")
+	mappingsFile := flag.String("mappings-file", "", "Path to persist regex mappings for cross-session rehydration")
 	debug := flag.Bool("debug", false, "Enable FUSE debug logging")
 	flag.Parse()
 
@@ -104,6 +105,17 @@ func main() {
 		log.Fatalf("Scanner error: %v", err)
 	}
 
+	// Load persisted regex mappings from a previous session.
+	if *mappingsFile != "" {
+		if _, err := os.Stat(*mappingsFile); err == nil {
+			if err := scanner.LoadMappings(*mappingsFile); err != nil {
+				log.Printf("Warning: loading mappings from %s: %v", *mappingsFile, err)
+			} else {
+				log.Printf("Loaded mappings from %s", *mappingsFile)
+			}
+		}
+	}
+
 	// Build skip extension set.
 	skipExts := make(map[string]bool)
 	for k, v := range defaultSkipExtensions {
@@ -160,6 +172,14 @@ func main() {
 	log.Printf("Mounted %s -> %s", sourceDir, *mountDir)
 
 	cleanup := func() {
+		// Save regex mappings before unmounting.
+		if *mappingsFile != "" {
+			if err := scanner.SaveMappings(*mappingsFile); err != nil {
+				log.Printf("Warning: saving mappings to %s: %v", *mappingsFile, err)
+			} else {
+				log.Printf("Saved mappings to %s", *mappingsFile)
+			}
+		}
 		log.Printf("Unmounting %s", *mountDir)
 		server.Unmount()
 		if tempMount {

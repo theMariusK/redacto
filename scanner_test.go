@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -342,5 +344,82 @@ func TestRegexDeterministicPlaceholder(t *testing.T) {
 
 	if !bytes.Equal(buf1, buf2) {
 		t.Errorf("same input produced different placeholders: %q vs %q", buf1, buf2)
+	}
+}
+
+// --- Mappings persistence tests ---
+
+func TestSaveAndLoadMappingsRoundTrip(t *testing.T) {
+	s := mustNewScanner(t, []Rule{
+		{Pattern: "[0-9a-f]{8}"},
+	})
+
+	// Redact to populate mappings.
+	buf := []byte("key=deadbeef val=cafebabe end")
+	original := make([]byte, len(buf))
+	copy(original, buf)
+	s.Redact(buf)
+
+	// Save mappings.
+	path := filepath.Join(t.TempDir(), "mappings.json")
+	if err := s.SaveMappings(path); err != nil {
+		t.Fatalf("SaveMappings: %v", err)
+	}
+
+	// Create a fresh scanner and load the saved mappings.
+	s2 := mustNewScanner(t, []Rule{
+		{Pattern: "[0-9a-f]{8}"},
+	})
+	if err := s2.LoadMappings(path); err != nil {
+		t.Fatalf("LoadMappings: %v", err)
+	}
+
+	// Rehydrate using the loaded mappings — should recover original text.
+	n := s2.Rehydrate(buf)
+	if n != 2 {
+		t.Errorf("expected 2 rehydrations, got %d", n)
+	}
+	if !bytes.Equal(buf, original) {
+		t.Errorf("round-trip failed: got %q, want %q", string(buf), string(original))
+	}
+}
+
+func TestLoadMappingsNonexistentFile(t *testing.T) {
+	s := mustNewScanner(t, nil)
+
+	err := s.LoadMappings(filepath.Join(t.TempDir(), "does-not-exist.json"))
+	if err == nil {
+		t.Fatal("expected error for nonexistent file, got nil")
+	}
+}
+
+func TestLoadMappingsCorruptFile(t *testing.T) {
+	s := mustNewScanner(t, nil)
+
+	path := filepath.Join(t.TempDir(), "corrupt.json")
+	if err := os.WriteFile(path, []byte("not valid json{{{"), 0600); err != nil {
+		t.Fatalf("writing corrupt file: %v", err)
+	}
+
+	err := s.LoadMappings(path)
+	if err == nil {
+		t.Fatal("expected error for corrupt file, got nil")
+	}
+}
+
+func TestSaveMappingsEmptyMap(t *testing.T) {
+	s := mustNewScanner(t, nil)
+
+	path := filepath.Join(t.TempDir(), "empty.json")
+	if err := s.SaveMappings(path); err != nil {
+		t.Fatalf("SaveMappings: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading saved file: %v", err)
+	}
+	if string(data) != "{}" {
+		t.Errorf("expected empty JSON object, got %q", string(data))
 	}
 }

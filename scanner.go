@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"sync"
 )
@@ -130,4 +132,35 @@ func (s *Scanner) scan(buf []byte, reverse bool) int {
 		}
 	}
 	return count
+}
+
+// LoadMappings loads placeholder-to-original mappings from a JSON file into the
+// scanner's mapping store. This restores regex mappings from a previous session.
+func (s *Scanner) LoadMappings(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return fmt.Errorf("parsing mappings file: %w", err)
+	}
+	for k, v := range m {
+		s.mappings.Store(k, v)
+	}
+	return nil
+}
+
+// SaveMappings writes the current placeholder-to-original mappings to a JSON file.
+func (s *Scanner) SaveMappings(path string) error {
+	m := make(map[string]string)
+	s.mappings.Range(func(key, value any) bool {
+		m[key.(string)] = value.(string)
+		return true
+	})
+	data, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("marshaling mappings: %w", err)
+	}
+	return os.WriteFile(path, data, 0600)
 }

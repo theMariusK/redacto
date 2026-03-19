@@ -138,11 +138,22 @@ func main() {
 		skipPaths[p] = true
 	}
 
+	// Build passthrough commands set.
+	var processChecker *ProcessChecker
+	if len(cfg.PassthroughCommands) > 0 {
+		cmds := make(map[string]bool, len(cfg.PassthroughCommands))
+		for _, c := range cfg.PassthroughCommands {
+			cmds[c] = true
+		}
+		processChecker = NewProcessChecker(cmds)
+	}
+
 	rr := &RedactRoot{
 		scanner:        scanner,
 		skipExtensions: skipExts,
 		skipPaths:      skipPaths,
 		rehydrate:      !*noRehydrateWrites,
+		processChecker: processChecker,
 	}
 
 	// Create or use mount directory.

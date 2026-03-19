@@ -32,6 +32,7 @@ type RedactRoot struct {
 	skipExtensions map[string]bool
 	skipPaths      map[string]bool
 	rehydrate      bool
+	processChecker *ProcessChecker
 }
 
 // RedactNode extends LoopbackNode to return RedactingFile handles.
@@ -89,10 +90,17 @@ func (n *RedactNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, 
 		return fh, fuseFlags, 0
 	}
 
+	// Check if the calling process should bypass redaction.
+	passthrough := false
+	if caller, ok := fuse.FromContext(ctx); ok {
+		passthrough = n.redactRoot.processChecker.ShouldPassthrough(caller.Pid)
+	}
+
 	return &RedactingFile{
-		fd:        fd,
-		scanner:   n.redactRoot.scanner,
-		rehydrate: n.redactRoot.rehydrate,
+		fd:          fd,
+		scanner:     n.redactRoot.scanner,
+		rehydrate:   n.redactRoot.rehydrate,
+		passthrough: passthrough,
 	}, fuse.FOPEN_DIRECT_IO, 0
 }
 
@@ -115,20 +123,27 @@ func (n *RedactNode) Create(ctx context.Context, name string, flags uint32, mode
 		return inode, fh, fuseFlags, 0
 	}
 
+	passthrough := false
+	if caller, ok := fuse.FromContext(ctx); ok {
+		passthrough = n.redactRoot.processChecker.ShouldPassthrough(caller.Pid)
+	}
+
 	return inode, &RedactingFile{
-		fd:        fd,
-		scanner:   n.redactRoot.scanner,
-		rehydrate: n.redactRoot.rehydrate,
+		fd:          fd,
+		scanner:     n.redactRoot.scanner,
+		rehydrate:   n.redactRoot.rehydrate,
+		passthrough: passthrough,
 	}, fuse.FOPEN_DIRECT_IO, 0
 }
 
 // RedactingFile is a file handle that intercepts Read and Write for
 // redaction and rehydration. It manages the underlying fd directly.
 type RedactingFile struct {
-	mu        sync.Mutex
-	fd        int
-	scanner   *Scanner
-	rehydrate bool
+	mu          sync.Mutex
+	fd          int
+	scanner     *Scanner
+	rehydrate   bool
+	passthrough bool
 }
 
 // Compile-time interface checks.
@@ -170,7 +185,7 @@ func (f *RedactingFile) Read(ctx context.Context, dest []byte, off int64) (fuse.
 		}
 	}
 
-	if !binary {
+	if !binary && !f.passthrough {
 		f.scanner.Redact(data)
 	}
 
@@ -182,7 +197,7 @@ func (f *RedactingFile) Write(ctx context.Context, data []byte, off int64) (uint
 	defer f.mu.Unlock()
 
 	writeData := data
-	if f.rehydrate {
+	if f.rehydrate && !f.passthrough {
 		// Copy to avoid modifying the caller's slice.
 		scratch := make([]byte, len(data))
 		copy(scratch, data)

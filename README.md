@@ -110,6 +110,11 @@ env_rules:
   - name: "ANTHROPIC_API_KEY"
     placeholder: "REDACTED"
 
+# Commands that bypass redaction (see originals)
+passthrough_commands:
+  - terraform
+  - kubectl
+
 # Optional: additional extensions/paths to skip
 skip_extensions: [".bin", ".dat"]
 skip_paths: [".cache", "build"]
@@ -130,23 +135,42 @@ Each rule must have exactly one of `original` or `pattern`.
 - Matched text is stored for rehydration (mappings accumulate for the scanner's lifetime)
 - Use `--mappings-file` to persist these mappings across restarts, so placeholders from a previous session can still be rehydrated
 
+### Passthrough commands
+
+Infrastructure tools like `terraform`, `kubectl`, or `aws` need to see real credentials to function. The `passthrough_commands` config option lets you list command names that should bypass redaction:
+
+```yaml
+passthrough_commands:
+  - terraform
+  - kubectl
+  - aws
+  - helm
+  - gcloud
+```
+
+When a process whose name (or any ancestor's name) matches this list reads a file through the FUSE mount, it receives the original unredacted content. The AI agent and its tools still see redacted placeholders.
+
+This works by inspecting the caller PID on each FUSE `open()` call and walking the process tree to check command names. The decision is made once at file open time and cached per PID, so there is no per-read overhead.
+
+Works on both Linux (`/proc`-based) and macOS (`sysctl`-based).
+
 ## How It Works
 
 ```
-AI Agent (works in /mnt/redacted)
-            |
-    reads/writes files
-            |
-    Kernel VFS (FUSE)
-            |
-    redacto daemon (Go, userspace)
-        |                   |
-    Read handler:       Write handler:
-    pread(real_fd)      scan for placeholders
-    scan & redact       replace with originals
-    return redacted     pwrite(real_fd)
-        |                   |
-    Real Filesystem (/home/user/project)
+AI Agent (works in /mnt/redacted)          terraform, kubectl, etc.
+            |                                        |
+    reads/writes files                       reads/writes files
+            |                                        |
+            +------------ Kernel VFS (FUSE) ---------+
+                                |
+                    redacto daemon (Go, userspace)
+                    checks caller PID on open()
+                           /            \
+               AI agent PID:         passthrough PID:
+               Read: redact          Read: raw passthrough
+               Write: rehydrate     Write: raw passthrough
+                           \            /
+                    Real Filesystem (/home/user/project)
 ```
 
 - `direct_io` is enabled to bypass the kernel page cache, ensuring every read/write passes through the redaction handlers

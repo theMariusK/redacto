@@ -1,0 +1,460 @@
+# extended-redacto.yaml
+#
+# Comprehensive redaction config with regex patterns for common secrets.
+# Patterns sourced from gitleaks, trufflehog, and provider documentation.
+#
+# HOW TO USE:
+#   redacto --config extended-redacto.yaml -- your-command
+#
+# NOTE: Regex rules generate placeholders automatically per match.
+# You can combine these with literal rules for known secrets:
+#
+#   rules:
+#     - original: "my-exact-secret-value"           # literal
+#     - pattern: "ghp_[0-9a-zA-Z]{36}"              # regex
+#
+# WARNING: Some patterns (especially broad ones like JWT or generic hex)
+# may cause false positives. Review and pick only what you need.
+
+
+rules:
+
+  # ============================================================
+  # AWS
+  # ============================================================
+
+  # AWS Access Key ID (starts with AKIA, ASIA, ABIA, ACCA, or A3T)
+  - pattern: "(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16}"
+
+  # AWS Secret Access Key (40-char base64)
+  # Requires context prefix to avoid false positives
+  # - pattern: "(?i)aws_secret_access_key[\"'\\s=:]+[A-Za-z0-9/+=]{40}"
+
+  # AWS MWS Key
+  - pattern: "amzn\\.mws\\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+
+
+  # ============================================================
+  # GitHub
+  # ============================================================
+
+  # Personal Access Token (classic)
+  - pattern: "ghp_[0-9a-zA-Z]{36}"
+
+  # OAuth Access Token
+  - pattern: "gho_[0-9a-zA-Z]{36}"
+
+  # App Installation / User-to-Server Token
+  - pattern: "gh[us]_[0-9a-zA-Z]{36}"
+
+  # Fine-Grained Personal Access Token
+  - pattern: "github_pat_[0-9a-zA-Z_]{82}"
+
+  # Refresh Token
+  - pattern: "ghr_[0-9a-zA-Z]{36}"
+
+
+  # ============================================================
+  # GitLab
+  # ============================================================
+
+  # Personal Access Token
+  - pattern: "glpat-[\\w-]{20}"
+
+  # Pipeline Trigger Token
+  - pattern: "glptt-[0-9a-f]{40}"
+
+  # Runner Registration Token
+  - pattern: "GR1348941[\\w-]{20}"
+
+  # Deploy Token
+  - pattern: "gldt-[0-9a-zA-Z_-]{20}"
+
+
+  # ============================================================
+  # Anthropic
+  # ============================================================
+
+  # Anthropic API Key
+  - pattern: "sk-ant-api03-[a-zA-Z0-9_-]{93}AA"
+
+  # Anthropic Admin API Key
+  - pattern: "sk-ant-admin01-[a-zA-Z0-9_-]{93}AA"
+
+
+  # ============================================================
+  # OpenAI
+  # ============================================================
+
+  # OpenAI API Key (project/service/admin scoped, or legacy)
+  - pattern: "sk-(?:proj|svcacct|admin)-[a-zA-Z0-9_-]{20,120}"
+
+  # OpenAI legacy format
+  - pattern: "sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20}"
+
+
+  # ============================================================
+  # Google / GCP
+  # ============================================================
+
+  # GCP API Key
+  - pattern: "AIza[\\w-]{35}"
+
+  # Google OAuth Client Secret (format: GOCSPX-)
+  - pattern: "GOCSPX-[a-zA-Z0-9_-]{28}"
+
+
+  # ============================================================
+  # Azure
+  # ============================================================
+
+  # Azure AD Client Secret
+  - pattern: "[a-zA-Z0-9_~.]{3}[0-9]Q~[a-zA-Z0-9_~.-]{31,34}"
+
+
+  # ============================================================
+  # Slack
+  # ============================================================
+
+  # Bot Token
+  - pattern: "xoxb-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24}"
+
+  # User Token
+  - pattern: "xoxp-[0-9]{10,13}-[0-9]{10,13}-[0-9]{10,13}-[a-z0-9]{32}"
+
+  # App-Level Token
+  - pattern: "xapp-[0-9]-[A-Z0-9]+-[0-9]+-[a-z0-9]+"
+
+  # Webhook URL (just the path portion)
+  - pattern: "hooks\\.slack\\.com/services/T[A-Z0-9]{8,}/B[A-Z0-9]{8,}/[a-zA-Z0-9]{24}"
+
+
+  # ============================================================
+  # Stripe
+  # ============================================================
+
+  # Secret Key / Restricted Key (live or test)
+  - pattern: "[sr]k_(?:test|live|prod)_[a-zA-Z0-9]{10,99}"
+
+
+  # ============================================================
+  # Twilio
+  # ============================================================
+
+  # API Key
+  - pattern: "SK[0-9a-fA-F]{32}"
+
+  # Account SID
+  - pattern: "AC[0-9a-f]{32}"
+
+
+  # ============================================================
+  # SendGrid
+  # ============================================================
+
+  # API Key
+  - pattern: "SG\\.[a-zA-Z0-9_-]{22}\\.[a-zA-Z0-9_-]{43}"
+
+
+  # ============================================================
+  # Mailgun
+  # ============================================================
+
+  - pattern: "key-[0-9a-zA-Z]{32}"
+
+
+  # ============================================================
+  # Shopify
+  # ============================================================
+
+  # Access Token
+  - pattern: "shpat_[a-fA-F0-9]{32}"
+
+  # Custom App Access Token
+  - pattern: "shpca_[a-fA-F0-9]{32}"
+
+  # Shared Secret
+  - pattern: "shpss_[a-fA-F0-9]{32}"
+
+
+  # ============================================================
+  # NPM
+  # ============================================================
+
+  - pattern: "npm_[a-z0-9]{36}"
+
+
+  # ============================================================
+  # PyPI
+  # ============================================================
+
+  - pattern: "pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}"
+
+
+  # ============================================================
+  # Heroku
+  # ============================================================
+
+  - pattern: "HRKU-AA[0-9a-zA-Z_-]{58}"
+
+
+  # ============================================================
+  # HashiCorp Vault
+  # ============================================================
+
+  # Service Token
+  - pattern: "hvs\\.[\\w-]{90,120}"
+
+  # Batch Token
+  - pattern: "hvb\\.[\\w-]{138,300}"
+
+
+  # ============================================================
+  # Databricks
+  # ============================================================
+
+  - pattern: "dapi[a-f0-9]{32}"
+
+
+  # ============================================================
+  # Grafana
+  # ============================================================
+
+  # API Key (base64 JSON starting with {"k":...)
+  - pattern: "eyJrIjoi[A-Za-z0-9+/]{70,400}={0,3}"
+
+
+  # ============================================================
+  # Discord
+  # ============================================================
+
+  # Bot Token (base64-encoded user ID . timestamp . HMAC)
+  - pattern: "[MN][A-Za-z0-9]{23,}\\.[a-zA-Z0-9_-]{6}\\.[a-zA-Z0-9_-]{27,}"
+
+  # Webhook URL path
+  - pattern: "discord\\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+"
+
+
+  # ============================================================
+  # Telegram
+  # ============================================================
+
+  # Bot Token
+  - pattern: "[0-9]{8,10}:[a-zA-Z0-9_-]{35}"
+
+
+  # ============================================================
+  # JSON Web Tokens (JWT)
+  # ============================================================
+
+  # Standard JWT (header.payload.signature)
+  - pattern: "eyJ[a-zA-Z0-9_-]{17,}\\.eyJ[a-zA-Z0-9_/-]{17,}\\.[a-zA-Z0-9_/-]{10,}={0,2}"
+
+
+  # ============================================================
+  # Private Keys (PEM)
+  # ============================================================
+
+  # This catches RSA, EC, DSA, OPENSSH, and generic PRIVATE KEY blocks.
+  # NOTE: This is a multiline pattern. Go regex handles it if the
+  # entire PEM block appears in a single read buffer.
+  # - pattern: "-----BEGIN[A-Z ]*PRIVATE KEY-----"
+  #
+  # ^ Commented out: PEM blocks span many lines and the scanner
+  #   processes fixed-size buffers. Matching just the header line
+  #   would redact the header but leave the key body exposed.
+  #   Use a literal rule for known key files instead.
+
+
+  # ============================================================
+  # Age Encryption
+  # ============================================================
+
+  - pattern: "AGE-SECRET-KEY-1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{58}"
+
+
+  # ============================================================
+  # Doppler
+  # ============================================================
+
+  - pattern: "dp\\.st\\.[a-z0-9_-]{43}"
+
+
+  # ============================================================
+  # DigitalOcean
+  # ============================================================
+
+  # Personal Access Token
+  - pattern: "dop_v1_[a-f0-9]{64}"
+
+  # OAuth Token
+  - pattern: "doo_v1_[a-f0-9]{64}"
+
+  # Refresh Token
+  - pattern: "dor_v1_[a-f0-9]{64}"
+
+
+  # ============================================================
+  # Supabase
+  # ============================================================
+
+  - pattern: "sbp_[a-f0-9]{40}"
+
+
+  # ============================================================
+  # Postman
+  # ============================================================
+
+  - pattern: "PMAK-[a-f0-9]{24}-[a-f0-9]{34}"
+
+
+  # ============================================================
+  # Linear
+  # ============================================================
+
+  - pattern: "lin_api_[a-zA-Z0-9]{40}"
+
+
+  # ============================================================
+  # Figma
+  # ============================================================
+
+  - pattern: "figd_[a-zA-Z0-9_-]{40,}"
+
+
+  # ============================================================
+  # Contentful
+  # ============================================================
+
+  - pattern: "CFPAT-[a-zA-Z0-9_-]{43}"
+
+
+  # ============================================================
+  # Atlassian (Jira, Confluence)
+  # ============================================================
+
+  # API Token
+  - pattern: "ATATT3xFfGF0[A-Za-z0-9_/+=.-]{50,200}"
+
+
+  # ============================================================
+  # Datadog
+  # ============================================================
+
+  # API Key (32-char hex)
+  # - pattern: "[a-f0-9]{32}"   # Too broad, commented out
+
+  # App Key (40-char hex)
+  # - pattern: "[a-f0-9]{40}"   # Too broad, commented out
+
+
+  # ============================================================
+  # Docker / Container Registries
+  # ============================================================
+
+  # Docker Hub Personal Access Token
+  - pattern: "dckr_pat_[A-Za-z0-9_-]{27}"
+
+
+  # ============================================================
+  # Firebase
+  # ============================================================
+
+  # Cloud Messaging Server Key (same format as GCP)
+  # - pattern: "AAAA[a-zA-Z0-9_-]{7}:[a-zA-Z0-9_-]{140}"
+
+
+  # ============================================================
+  # Hugging Face
+  # ============================================================
+
+  - pattern: "hf_[a-zA-Z0-9]{34}"
+
+
+  # ============================================================
+  # Replicate
+  # ============================================================
+
+  - pattern: "r8_[a-zA-Z0-9]{37}"
+
+
+  # ============================================================
+  # Vercel
+  # ============================================================
+
+  # Personal access token / integration token
+  # Vercel tokens don't have a fixed public prefix; use literal rules
+  # for known values instead.
+
+
+# ============================================================
+# Environment variable rules (no same-length constraint)
+# ============================================================
+
+env_rules:
+  - name: "AWS_ACCESS_KEY_ID"
+    placeholder: "REDACTED"
+  - name: "AWS_SECRET_ACCESS_KEY"
+    placeholder: "REDACTED"
+  - name: "AWS_SESSION_TOKEN"
+    placeholder: "REDACTED"
+  - name: "ANTHROPIC_API_KEY"
+    placeholder: "REDACTED"
+  - name: "OPENAI_API_KEY"
+    placeholder: "REDACTED"
+  - name: "GITHUB_TOKEN"
+    placeholder: "REDACTED"
+  - name: "GITLAB_TOKEN"
+    placeholder: "REDACTED"
+  - name: "SLACK_TOKEN"
+    placeholder: "REDACTED"
+  - name: "SLACK_BOT_TOKEN"
+    placeholder: "REDACTED"
+  - name: "STRIPE_SECRET_KEY"
+    placeholder: "REDACTED"
+  - name: "STRIPE_API_KEY"
+    placeholder: "REDACTED"
+  - name: "TWILIO_AUTH_TOKEN"
+    placeholder: "REDACTED"
+  - name: "SENDGRID_API_KEY"
+    placeholder: "REDACTED"
+  - name: "GCP_API_KEY"
+    placeholder: "REDACTED"
+  - name: "GOOGLE_API_KEY"
+    placeholder: "REDACTED"
+  - name: "AZURE_CLIENT_SECRET"
+    placeholder: "REDACTED"
+  - name: "DATABASE_URL"
+    placeholder: "REDACTED"
+  - name: "REDIS_URL"
+    placeholder: "REDACTED"
+  - name: "MONGO_URI"
+    placeholder: "REDACTED"
+  - name: "DISCORD_TOKEN"
+    placeholder: "REDACTED"
+  - name: "TELEGRAM_BOT_TOKEN"
+    placeholder: "REDACTED"
+  - name: "NPM_TOKEN"
+    placeholder: "REDACTED"
+  - name: "DOCKER_PASSWORD"
+    placeholder: "REDACTED"
+  - name: "HEROKU_API_KEY"
+    placeholder: "REDACTED"
+  - name: "DATADOG_API_KEY"
+    placeholder: "REDACTED"
+  - name: "VAULT_TOKEN"
+    placeholder: "REDACTED"
+  - name: "SUPABASE_SERVICE_ROLE_KEY"
+    placeholder: "REDACTED"
+  - name: "HF_TOKEN"
+    placeholder: "REDACTED"
+  - name: "REPLICATE_API_TOKEN"
+    placeholder: "REDACTED"
+  - name: "LINEAR_API_KEY"
+    placeholder: "REDACTED"
+  - name: "FIGMA_TOKEN"
+    placeholder: "REDACTED"
+  - name: "DOPPLER_TOKEN"
+    placeholder: "REDACTED"
+  - name: "VERCEL_TOKEN"
+    placeholder: "REDACTED"

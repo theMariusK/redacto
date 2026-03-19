@@ -34,10 +34,11 @@ type EnvRule struct {
 }
 
 type Config struct {
-	Rules          []Rule   `yaml:"rules"`
-	EnvRules       []EnvRule `yaml:"env_rules"`
-	SkipExtensions []string `yaml:"skip_extensions"`
-	SkipPaths      []string `yaml:"skip_paths"`
+	Rules               []Rule   `yaml:"rules"`
+	EnvRules            []EnvRule `yaml:"env_rules"`
+	SkipExtensions      []string `yaml:"skip_extensions"`
+	SkipPaths           []string `yaml:"skip_paths"`
+	PassthroughCommands []string `yaml:"passthrough_commands"`
 }
 
 func loadConfig(path string) (*Config, error) {

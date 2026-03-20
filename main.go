@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 
@@ -166,6 +167,15 @@ func main() {
 		*mountDir = dir
 		tempMount = true
 	} else {
+		// Clean up any stale FUSE mount from a previous session that
+		// crashed or was killed without unmounting.
+		if fi, err := os.Lstat(*mountDir); err == nil && fi.IsDir() {
+			if runtime.GOOS == "darwin" {
+				_ = exec.Command("umount", *mountDir).Run()
+			} else {
+				_ = exec.Command("fusermount", "-u", *mountDir).Run()
+			}
+		}
 		if err := os.MkdirAll(*mountDir, 0755); err != nil {
 			log.Fatalf("Creating mount dir %q: %v", *mountDir, err)
 		}
